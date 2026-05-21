@@ -1,0 +1,57 @@
+name: "📝 Documentation"
+description: "Improve or add documentation, comments, or guides"
+labels: ["documentation", "open"]
+body:
+  - type: dropdown
+    id: repo
+    attributes:
+      label: Which project?
+      options:
+        - competition-hub
+        - college-utils
+        - student-api
+        - ds-visualiser
+    validations:
+      required: true
+
+  - type: dropdown
+    id: doc_type
+    attributes:
+      label: Documentation type
+      options:
+        - README improvement
+        - Add / improve code comments
+        - Write a wiki page
+        - Fix broken links
+        - Add usage examples
+        - API documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What needs to be documented?
+      placeholder: Describe clearly what is missing or needs improvement
+    validations:
+      required: true
+
+  - type: textarea
+    id: location
+    attributes:
+      label: File or section location
+      placeholder: e.g. README.md line 42, or src/routes/colleges.ts
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Points
+        **10 points** awarded on merge ⚡
+
+        This is an **open** issue — multiple people can submit PRs, best one gets merged.
+
+        > Claim this issue on Discord: `/claim issue:NUMBER repo:REPO_NAME`
+        > Claim window: **3 days**

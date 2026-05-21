@@ -1,0 +1,81 @@
+name: "🐛 Bug Fix"
+description: "Report a bug that needs to be fixed"
+labels: ["bug-fix"]
+body:
+  - type: dropdown
+    id: repo
+    attributes:
+      label: Which project is this bug in?
+      options:
+        - college-utils
+        - student-api
+        - ds-visualiser
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug description
+      placeholder: A clear description of what the bug is
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to '...'
+        2. Click on '...'
+        3. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      placeholder: What should happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      placeholder: What actually happens?
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots or logs
+      placeholder: Paste any error messages, console logs, or screenshots here
+    validations:
+      required: false
+
+  - type: dropdown
+    id: difficulty
+    attributes:
+      label: Difficulty
+      description: Maintainer will set this — leave as Easy if unsure
+      options:
+        - easy
+        - medium
+        - hard
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Points
+        | Difficulty | Points |
+        |---|---|
+        | Easy | 20 pts |
+        | Medium | 20 pts |
+        | Hard | 20 pts |
+
+        > Claim this issue on Discord: `/claim issue:NUMBER repo:REPO_NAME`

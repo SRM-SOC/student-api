@@ -1,0 +1,65 @@
+name: "🎨 Design"
+description: "UI/UX improvements, assets, responsiveness fixes"
+labels: ["design", "open"]
+body:
+  - type: dropdown
+    id: repo
+    attributes:
+      label: Which project?
+      options:
+        - college-utils
+        - ds-visualiser
+    validations:
+      required: true
+
+  - type: dropdown
+    id: design_type
+    attributes:
+      label: Design task type
+      options:
+        - UI improvement
+        - Responsiveness / mobile fix
+        - Dark mode support
+        - Create icons or assets
+        - Improve colour scheme / typography
+        - Animation improvement
+        - Accessibility (a11y)
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What needs to be improved?
+      placeholder: Describe the current design issue and what better looks like
+    validations:
+      required: true
+
+  - type: textarea
+    id: reference
+    attributes:
+      label: Reference or inspiration
+      placeholder: Links to designs, screenshots, Figma, or similar sites for reference
+    validations:
+      required: false
+
+  - type: textarea
+    id: screens
+    attributes:
+      label: Affected pages or components
+      placeholder: e.g. /cgpa page, Navbar component, mobile view only
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Points
+        **15 points** awarded on merge ⚡
+
+        This is an **open** issue — multiple people can submit PRs, maintainers pick the best one.
+        Great for designers and non-programmers!
+
+        > Claim this issue on Discord: `/claim issue:NUMBER repo:REPO_NAME`
+        > Claim window: **3 days**

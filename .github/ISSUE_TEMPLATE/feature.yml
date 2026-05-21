@@ -1,0 +1,62 @@
+name: "✨ Feature"
+description: "A new feature to be implemented"
+labels: ["feature"]
+body:
+  - type: dropdown
+    id: repo
+    attributes:
+      label: Which project?
+      options:
+        - college-utils
+        - student-api
+        - ds-visualiser
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Feature description
+      placeholder: What should this feature do? Describe it clearly.
+    validations:
+      required: true
+
+  - type: textarea
+    id: spec
+    attributes:
+      label: Acceptance criteria
+      description: What must be true for this issue to be considered done?
+      placeholder: |
+        - [ ] User can do X
+        - [ ] Clicking Y shows Z
+        - [ ] API returns { ... } on GET /route
+    validations:
+      required: true
+
+  - type: textarea
+    id: design
+    attributes:
+      label: Design / technical notes
+      description: Any wireframes, API contracts, or implementation hints for the contributor
+      placeholder: Optional but helpful
+    validations:
+      required: false
+
+  - type: dropdown
+    id: difficulty
+    attributes:
+      label: Difficulty
+      options:
+        - medium
+        - hard
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Points
+        **40 points** awarded on merge ⚡
+
+        > Claim this issue on Discord: `/claim issue:NUMBER repo:REPO_NAME`
+        > Claim window: **5 days**

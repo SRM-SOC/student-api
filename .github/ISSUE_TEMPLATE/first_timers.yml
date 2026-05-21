@@ -1,0 +1,63 @@
+name: "🌱 First Timers Only"
+description: "Reserved for contributors with 0 merged PRs — beginner friendly, step-by-step"
+labels: ["first-timers-only", "easy"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 🌱 This issue is for first-time contributors only
+        If you have already had a PR merged in this competition, please leave this issue for someone else.
+        The bot will automatically block your claim if you have any merged PRs.
+
+  - type: dropdown
+    id: repo
+    attributes:
+      label: Which project?
+      options:
+        - college-utils
+        - student-api
+        - ds-visualiser
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What needs to be done?
+      placeholder: Clear, simple description written for beginners
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Step-by-step instructions
+      description: Walk the contributor through exactly what to do — file locations, what to change, etc.
+      placeholder: |
+        1. Open the file `src/components/Navbar.tsx`
+        2. Find the line that says `...`
+        3. Change it to `...`
+        4. Test by running `npm run dev` and visiting `/`
+    validations:
+      required: true
+
+  - type: textarea
+    id: hints
+    attributes:
+      label: Hints and useful links
+      placeholder: |
+        - Docs link: ...
+        - Similar example in codebase: ...
+        - Ask in #help-and-questions on Discord if stuck
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Points
+        **10 points** awarded on merge ⚡
+
+        > Claim this issue on Discord: `/claim issue:NUMBER repo:REPO_NAME`
+        > Claim window: **3 days**
+        > **Only claimable if you have 0 merged PRs in SRM-SOC**

@@ -1,0 +1,64 @@
+name: "⚡ Enhancement"
+description: "Improve something that already exists"
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: repo
+    attributes:
+      label: Which project?
+      options:
+        - college-utils
+        - student-api
+        - ds-visualiser
+    validations:
+      required: true
+
+  - type: textarea
+    id: current
+    attributes:
+      label: Current behaviour
+      placeholder: How does this currently work?
+    validations:
+      required: true
+
+  - type: textarea
+    id: improved
+    attributes:
+      label: Improved behaviour
+      placeholder: How should it work after your enhancement?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: type
+    attributes:
+      label: Enhancement type
+      options:
+        - Performance improvement
+        - Better error handling
+        - Accessibility fix
+        - Code refactor / cleanup
+        - UI/UX improvement
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: difficulty
+    attributes:
+      label: Difficulty
+      options:
+        - easy
+        - medium
+        - hard
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Points
+        **25 points** awarded on merge ⚡
+
+        > Claim this issue on Discord: `/claim issue:NUMBER repo:REPO_NAME`
+        > Claim window: **5 days**
