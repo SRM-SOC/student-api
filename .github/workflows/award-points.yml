@@ -1,0 +1,142 @@
+name: Award Points on Merge
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  award:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+      issues: write
+
+    steps:
+      - name: Award points
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pr = context.payload.pull_request;
+            const author = pr.user.login;
+            const prNumber = pr.number;
+            const repo = context.repo.repo;
+            const prUrl = pr.html_url;
+
+            const supabaseUrl = process.env.SUPABASE_URL;
+            const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
+
+            const headers = {
+              apikey: supabaseKey,
+              Authorization: `Bearer ${supabaseKey}`,
+              'Content-Type': 'application/json'
+            };
+
+            // ── 1. Get labels from PR ───────────────────────────────
+            const labels = pr.labels.map(l => l.name);
+
+            const POINT_MAP = {
+              'onboarding': 5,
+              'documentation': 10,
+              'first-timers-only': 10,
+              'design': 15,
+              'bug-fix': 20,
+              'enhancement': 25,
+              'feature': 40
+            };
+
+            const DIFFICULTY_BONUS = {
+              'easy': 0,
+              'medium': 5,
+              'hard': 15
+            };
+
+            // Find issue type and difficulty
+            const issueType = Object.keys(POINT_MAP).find(k => labels.includes(k)) || 'bug-fix';
+            const difficulty = Object.keys(DIFFICULTY_BONUS).find(k => labels.includes(k)) || 'easy';
+            const basePoints = POINT_MAP[issueType];
+            const bonus = DIFFICULTY_BONUS[difficulty];
+            const totalPoints = basePoints + bonus;
+
+            // ── 2. Get issue number from PR body ────────────────────
+            const body = pr.body || '';
+            const issueMatch = body.match(/closes\s+#(\d+)/i);
+            const issueNumber = issueMatch ? parseInt(issueMatch[1]) : null;
+
+            // ── 3. Check participant is registered ──────────────────
+            const participantRes = await fetch(
+              `${supabaseUrl}/rest/v1/participants?github_username=eq.${author}&select=discord_id`,
+              { headers }
+            );
+            const participants = await participantRes.json();
+
+            if (!participants.length) {
+              console.log(`User ${author} is not registered — skipping points`);
+              return;
+            }
+
+            const discordId = participants[0].discord_id;
+
+            // ── 4. Award points via function ────────────────────────
+            await fetch(`${supabaseUrl}/rest/v1/rpc/award_points`, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({ github_user: author, pts: totalPoints })
+            });
+
+            // ── 5. Log contribution ─────────────────────────────────
+            if (issueNumber) {
+              await fetch(`${supabaseUrl}/rest/v1/contributions`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({
+                  github_username: author,
+                  repo,
+                  issue_number: issueNumber,
+                  pr_number: prNumber,
+                  issue_type: issueType,
+                  difficulty,
+                  points_awarded: totalPoints,
+                  pr_url: prUrl,
+                  merged_at: new Date().toISOString(),
+                  status: 'merged'
+                })
+              });
+
+              // Mark claim as completed
+              await fetch(
+                `${supabaseUrl}/rest/v1/claims?github_username=eq.${author}&repo=eq.${repo}&issue_number=eq.${issueNumber}&status=eq.active`,
+                {
+                  method: 'PATCH',
+                  headers,
+                  body: JSON.stringify({ status: 'completed' })
+                }
+              );
+            }
+
+            // ── 6. Notify Discord via webhook ───────────────────────
+            const discordWebhook = process.env.DISCORD_POINTS_WEBHOOK;
+            if (discordWebhook) {
+              await fetch(discordWebhook, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  embeds: [{
+                    title: '⭐ Points Awarded!',
+                    description:
+                      `**@${author}** just earned **${totalPoints} points** for merging a PR!\n\n` +
+                      `📋 Type: \`${issueType}\` | Difficulty: \`${difficulty}\`\n` +
+                      `🔗 [View PR #${prNumber}](${prUrl}) in \`${repo}\``,
+                    color: 0x2ECC71,
+                    timestamp: new Date().toISOString()
+                  }]
+                })
+              });
+            }
+
+            console.log(`✅ Awarded ${totalPoints} points to ${author}`);
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          DISCORD_POINTS_WEBHOOK: ${{ secrets.DISCORD_POINTS_WEBHOOK }}
