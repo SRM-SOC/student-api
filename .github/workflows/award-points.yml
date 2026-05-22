@@ -1,11 +1,11 @@
-name: Award Points on Merge
+name: Award Merge Bonus
 
 on:
   pull_request:
     types: [closed]
 
 jobs:
-  award:
+  merge_bonus:
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     permissions:
@@ -13,100 +13,129 @@ jobs:
       issues: write
 
     steps:
-      - name: Award points
+      - name: Award merge bonus points
         uses: actions/github-script@v7
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          DISCORD_POINTS_WEBHOOK: ${{ secrets.DISCORD_POINTS_WEBHOOK }}
+          DISCORD_PR_MERGED_WEBHOOK: ${{ secrets.DISCORD_PR_MERGED_WEBHOOK }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const pr = context.payload.pull_request;
             const author = pr.user.login;
             const prNumber = pr.number;
-            const repo = context.repo.repo;
-            const prUrl = pr.html_url;
+            const labels = pr.labels.map(l => l.name);
+
+            const SUBMIT_POINTS = {
+              'onboarding': 5, 'documentation': 5, 'first-timers-only': 5,
+              'design': 8, 'bug-fix': 10, 'enhancement': 12, 'feature': 20
+            };
+            const MERGE_BONUS = {
+              'onboarding': 0, 'documentation': 5, 'first-timers-only': 5,
+              'design': 7, 'bug-fix': 10, 'enhancement': 13, 'feature': 20
+            };
+
+            const issueType = Object.keys(MERGE_BONUS).find(k => labels.includes(k)) || 'bug-fix';
+            const submitPts = SUBMIT_POINTS[issueType];
+            const mergePts = MERGE_BONUS[issueType];
+            const totalPts = submitPts + mergePts;
 
             const supabaseUrl = process.env.SUPABASE_URL;
             const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
-
             const headers = {
               apikey: supabaseKey,
               Authorization: `Bearer ${supabaseKey}`,
               'Content-Type': 'application/json'
             };
 
-            // ── 1. Get labels from PR ───────────────────────────────
-            const labels = pr.labels.map(l => l.name);
+            // Check participant exists
+            const pRes = await fetch(
+              `${supabaseUrl}/rest/v1/participants?github_username=eq.${author}&select=discord_id`,
+              { headers }
+            );
+            const participants = await pRes.json();
+            if (!participants.length) {
+              console.log(`${author} not registered — skipping`);
+              return;
+            }
 
-            const POINT_MAP = {
-              'onboarding': 5,
-              'documentation': 10,
-              'first-timers-only': 10,
-              'design': 15,
-              'bug-fix': 20,
-              'enhancement': 25,
-              'feature': 40
-            };
+            // Check if submission points were already given
+            // (if PR was approved before merge, avoid double submission points)
+            const contribRes = await fetch(
+              `${supabaseUrl}/rest/v1/contributions?github_username=eq.${author}&pr_number=eq.${prNumber}&status=eq.approved`,
+              { headers }
+            );
+            const existing = await contribRes.json();
+            const alreadyGotSubmitPts = existing.length > 0;
 
-            const DIFFICULTY_BONUS = {
-              'easy': 0,
-              'medium': 5,
-              'hard': 15
-            };
+            // Award merge bonus only
+            if (mergePts > 0) {
+              await fetch(`${supabaseUrl}/rest/v1/rpc/award_merge_points`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ github_user: author, pts: mergePts })
+              });
+            }
 
-            // Find issue type and difficulty
-            const issueType = Object.keys(POINT_MAP).find(k => labels.includes(k)) || 'bug-fix';
-            const difficulty = Object.keys(DIFFICULTY_BONUS).find(k => labels.includes(k)) || 'easy';
-            const basePoints = POINT_MAP[issueType];
-            const bonus = DIFFICULTY_BONUS[difficulty];
-            const totalPoints = basePoints + bonus;
+            // If no prior submission points (PR merged without formal approval step)
+            // award full points instead
+            if (!alreadyGotSubmitPts) {
+              await fetch(`${supabaseUrl}/rest/v1/rpc/award_submission_points`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ github_user: author, pts: submitPts })
+              });
+            }
 
-            // ── 2. Get issue number from PR body ────────────────────
+            // Update contribution record
             const body = pr.body || '';
             const issueMatch = body.match(/closes\s+#(\d+)/i);
             const issueNumber = issueMatch ? parseInt(issueMatch[1]) : null;
 
-            // ── 3. Check participant is registered ──────────────────
-            const participantRes = await fetch(
-              `${supabaseUrl}/rest/v1/participants?github_username=eq.${author}&select=discord_id`,
-              { headers }
-            );
-            const participants = await participantRes.json();
-
-            if (!participants.length) {
-              console.log(`User ${author} is not registered — skipping points`);
-              return;
-            }
-
-            const discordId = participants[0].discord_id;
-
-            // ── 4. Award points via function ────────────────────────
-            await fetch(`${supabaseUrl}/rest/v1/rpc/award_points`, {
-              method: 'POST',
-              headers,
-              body: JSON.stringify({ github_user: author, pts: totalPoints })
-            });
-
-            // ── 5. Log contribution ─────────────────────────────────
             if (issueNumber) {
-              await fetch(`${supabaseUrl}/rest/v1/contributions`, {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({
-                  github_username: author,
-                  repo,
-                  issue_number: issueNumber,
-                  pr_number: prNumber,
-                  issue_type: issueType,
-                  difficulty,
-                  points_awarded: totalPoints,
-                  pr_url: prUrl,
-                  merged_at: new Date().toISOString(),
-                  status: 'merged'
-                })
-              });
+              if (alreadyGotSubmitPts) {
+                // Update existing record
+                await fetch(
+                  `${supabaseUrl}/rest/v1/contributions?github_username=eq.${author}&pr_number=eq.${prNumber}`,
+                  {
+                    method: 'PATCH',
+                    headers,
+                    body: JSON.stringify({
+                      merge_points: mergePts,
+                      points_awarded: totalPts,
+                      merged_at: new Date().toISOString(),
+                      status: 'merged'
+                    })
+                  }
+                );
+              } else {
+                // Insert fresh record
+                await fetch(`${supabaseUrl}/rest/v1/contributions`, {
+                  method: 'POST',
+                  headers,
+                  body: JSON.stringify({
+                    github_username: author,
+                    repo: context.repo.repo,
+                    issue_number: issueNumber,
+                    pr_number: prNumber,
+                    issue_type: issueType,
+                    difficulty: labels.find(l => ['easy','medium','hard'].includes(l)) || 'easy',
+                    submission_points: submitPts,
+                    merge_points: mergePts,
+                    points_awarded: totalPts,
+                    pr_url: pr.html_url,
+                    submitted_at: new Date().toISOString(),
+                    merged_at: new Date().toISOString(),
+                    status: 'merged'
+                  })
+                });
+              }
 
               // Mark claim as completed
               await fetch(
-                `${supabaseUrl}/rest/v1/claims?github_username=eq.${author}&repo=eq.${repo}&issue_number=eq.${issueNumber}&status=eq.active`,
+                `${supabaseUrl}/rest/v1/claims?github_username=eq.${author}&repo=eq.${context.repo.repo}&issue_number=eq.${issueNumber}`,
                 {
                   method: 'PATCH',
                   headers,
@@ -115,19 +144,34 @@ jobs:
               );
             }
 
-            // ── 6. Notify Discord via webhook ───────────────────────
-            const discordWebhook = process.env.DISCORD_POINTS_WEBHOOK;
-            if (discordWebhook) {
-              await fetch(discordWebhook, {
+            // Comment on PR
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body:
+                `## 🎉 PR Merged — Bonus Points Awarded!\n\n` +
+                `Congratulations @${author}! Your PR was selected and merged.\n\n` +
+                `| | Points |\n|---|---|\n` +
+                `| Submission | ${alreadyGotSubmitPts ? `already awarded` : `+${submitPts}`} |\n` +
+                `| Merge bonus | +${mergePts} |\n` +
+                `| **Total earned** | **${alreadyGotSubmitPts ? mergePts : totalPts} pts** |\n\n` +
+                `Check your score: \`/status\` on Discord 🏆`
+            });
+
+            // Notify #points-log
+            if (process.env.DISCORD_POINTS_WEBHOOK) {
+              await fetch(process.env.DISCORD_POINTS_WEBHOOK, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   embeds: [{
-                    title: '⭐ Points Awarded!',
+                    title: '🎉 PR Merged — Bonus Points!',
                     description:
-                      `**@${author}** just earned **${totalPoints} points** for merging a PR!\n\n` +
-                      `📋 Type: \`${issueType}\` | Difficulty: \`${difficulty}\`\n` +
-                      `🔗 [View PR #${prNumber}](${prUrl}) in \`${repo}\``,
+                      `**@${author}**'s PR was merged in \`${context.repo.repo}\`!\n\n` +
+                      `Merge bonus: **+${mergePts} pts**\n` +
+                      `Total earned this PR: **${alreadyGotSubmitPts ? mergePts : totalPts} pts**\n` +
+                      `[View PR #${prNumber}](${pr.html_url})`,
                     color: 0x2ECC71,
                     timestamp: new Date().toISOString()
                   }]
@@ -135,8 +179,20 @@ jobs:
               });
             }
 
-            console.log(`✅ Awarded ${totalPoints} points to ${author}`);
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          DISCORD_POINTS_WEBHOOK: ${{ secrets.DISCORD_POINTS_WEBHOOK }}
+            // Notify #pr-merged separately
+            if (process.env.DISCORD_PR_MERGED_WEBHOOK) {
+              await fetch(process.env.DISCORD_PR_MERGED_WEBHOOK, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  embeds: [{
+                    title: `✅ PR Merged in ${context.repo.repo}`,
+                    description:
+                      `**@${author}** just had a PR merged!\n` +
+                      `[PR #${prNumber} — ${pr.title}](${pr.html_url})`,
+                    color: 0x27AE60,
+                    timestamp: new Date().toISOString()
+                  }]
+                })
+              });
+            }

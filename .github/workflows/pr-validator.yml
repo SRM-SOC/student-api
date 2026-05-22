@@ -1,19 +1,27 @@
-name: PR Validator
+name: PR Validator and Submission Points
 
 on:
   pull_request:
     types: [opened, edited, reopened, synchronize]
+  pull_request_review:
+    types: [submitted]
 
 jobs:
+
+  # ── Job 1: Runs on every PR open/edit — validates format ──────────
   validate:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
       issues: read
 
     steps:
-      - name: Validate PR
+      - name: Validate PR format
         uses: actions/github-script@v7
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -23,154 +31,123 @@ jobs:
             const author = pr.user.login;
             const errors = [];
 
-            // ── Check 1: PR title format ────────────────────────────
-            // Valid: fix: #42 short description
+            // Check 1: PR title format
             const titleRegex = /^(fix|feat|docs|design|enhance|chore):\s#\d+\s.{5,}/;
             if (!titleRegex.test(title)) {
               errors.push(
                 `**❌ Invalid PR title format**\n` +
                 `Expected: \`fix: #42 short description\`\n` +
-                `Got: \`${title}\`\n` +
-                `Valid prefixes: \`fix\`, \`feat\`, \`docs\`, \`design\`, \`enhance\`, \`chore\``
+                `Got: \`${title}\``
               );
             }
 
-            // ── Check 2: Linked issue ───────────────────────────────
+            // Check 2: Linked issue
             const closesRegex = /closes\s+#(\d+)/i;
             const issueMatch = body.match(closesRegex);
             if (!issueMatch) {
               errors.push(
-                `**❌ No linked issue found**\n` +
-                `Your PR description must contain \`Closes #42\` (replace 42 with your issue number)`
+                `**❌ No linked issue**\n` +
+                `Add \`Closes #42\` in your PR description`
               );
             }
 
-            // ── Check 3: Issue number matches title ─────────────────
+            // Check 3: Issue number matches in title and body
             if (issueMatch) {
               const issueInBody = issueMatch[1];
               const issueInTitle = title.match(/#(\d+)/)?.[1];
               if (issueInTitle && issueInBody !== issueInTitle) {
                 errors.push(
                   `**❌ Issue number mismatch**\n` +
-                  `Title references #${issueInTitle} but body says \`Closes #${issueInBody}\``
+                  `Title says #${issueInTitle} but body says Closes #${issueInBody}`
                 );
               }
             }
 
-            // ── Check 4: PR description is filled ──────────────────
+            // Check 4: Description filled in
             const stripped = body.replace(/<!--.*?-->/gs, '').trim();
             if (stripped.length < 50) {
-              errors.push(
-                `**❌ PR description is too short**\n` +
-                `Please fill in all sections of the PR template properly`
-              );
+              errors.push(`**❌ PR description too short** — fill in all sections`);
             }
 
-            // ── Check 5: Checklist is checked ──────────────────────
+            // Check 5: Checklist completed
             const unchecked = (body.match(/- \[ \]/g) || []).length;
             if (unchecked > 0) {
-              errors.push(
-                `**❌ Checklist incomplete**\n` +
-                `You have ${unchecked} unchecked item(s) in your PR checklist`
-              );
+              errors.push(`**❌ ${unchecked} unchecked item(s)** in your checklist`);
             }
 
-            // ── Check 6: Branch naming ──────────────────────────────
+            // Check 6: Branch name
             const branch = pr.head.ref;
             const branchRegex = /^(fix|feat|docs|design|enhance|chore)\/issue-\d+/;
             if (!branchRegex.test(branch)) {
               errors.push(
                 `**❌ Invalid branch name**\n` +
-                `Expected: \`fix/issue-42\`\n` +
-                `Got: \`${branch}\``
+                `Expected: \`fix/issue-42\` — Got: \`${branch}\``
               );
             }
 
-            // ── Check 7: Verify claimer on Supabase ────────────────
+            // Check 7: Claimed on Discord
             const issueNumber = parseInt(issueMatch?.[1] || '0');
             if (issueNumber > 0) {
-              const supabaseUrl = process.env.SUPABASE_URL;
-              const supabaseKey = process.env.SUPABASE_KEY;
-
               const claimRes = await fetch(
-                `${supabaseUrl}/rest/v1/claims?repo=eq.${context.repo.repo}&issue_number=eq.${issueNumber}&github_username=eq.${author}&status=eq.active`,
-                { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` } }
+                `${process.env.SUPABASE_URL}/rest/v1/claims?repo=eq.${context.repo.repo}&issue_number=eq.${issueNumber}&github_username=eq.${author}&status=eq.active`,
+                { headers: { apikey: process.env.SUPABASE_KEY, Authorization: `Bearer ${process.env.SUPABASE_KEY}` } }
               );
               const claims = await claimRes.json();
-
-              // Also allow if it's an open issue (multiple claimers allowed)
-              const openClaimRes = await fetch(
-                `${supabaseUrl}/rest/v1/claims?repo=eq.${context.repo.repo}&issue_number=eq.${issueNumber}&status=eq.active`,
-                { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` } }
-              );
-              const allClaims = await openClaimRes.json();
-              const isAssigned = claims.length > 0;
-
-              if (!isAssigned) {
+              if (!claims.length) {
                 errors.push(
                   `**❌ Not assigned to this issue**\n` +
-                  `You must claim issue #${issueNumber} on Discord before raising a PR.\n` +
-                  `Run \`/claim issue:${issueNumber} repo:${context.repo.repo}\` in Discord`
+                  `Claim it first: \`/claim issue:${issueNumber} repo:${context.repo.repo}\``
                 );
               }
             }
 
-            // ── Post result comment ─────────────────────────────────
-            const existing = await github.rest.issues.listComments({
+            // Delete previous bot comments
+            const comments = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: pr.number
             });
-
-            // Delete previous bot comments to avoid spam
-            for (const comment of existing.data) {
-              if (comment.user?.login === 'github-actions[bot]') {
+            for (const c of comments.data) {
+              if (c.user?.login === 'github-actions[bot]') {
                 await github.rest.issues.deleteComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  comment_id: comment.id
+                  comment_id: c.id
                 });
               }
             }
 
             if (errors.length > 0) {
-              // Post failure comment
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: pr.number,
                 body:
                   `## ❌ PR Validation Failed\n\n` +
-                  `Hi @${author}! Your PR has **${errors.length} issue(s)** to fix:\n\n` +
+                  `Hi @${author}! Fix these **${errors.length} issue(s)** and push again:\n\n` +
                   errors.map((e, i) => `### ${i + 1}. ${e}`).join('\n\n') +
-                  `\n\n---\n` +
-                  `📋 Read the [Contributing Guide](https://github.com/${context.repo.owner}/competition-hub/blob/main/CONTRIBUTING.md) for full format rules.\n` +
-                  `Fix the issues above and push again — this check will re-run automatically.`
+                  `\n\n---\n📋 [Contributing Guide](https://github.com/${context.repo.owner}/competition-hub/blob/main/CONTRIBUTING.md)`
               });
-
-              // Add label
               await github.rest.issues.addLabels({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: pr.number,
                 labels: ['invalid']
               });
-
-              core.setFailed(`PR validation failed with ${errors.length} error(s)`);
+              core.setFailed(`${errors.length} validation error(s)`);
             } else {
-              // Post success comment
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: pr.number,
                 body:
                   `## ✅ PR Validation Passed\n\n` +
-                  `Great work @${author}! All checks passed.\n\n` +
-                  `⏳ A maintainer will review your PR within 48 hours.\n` +
-                  `💬 If you haven't already, share your PR in **#pr-reviews** on Discord for peer feedback!`
+                  `Great work @${author}! All format checks passed.\n\n` +
+                  `⏳ A maintainer will review your PR soon.\n` +
+                  `💡 You will receive **submission points** once your PR is approved.\n` +
+                  `🏆 If your PR gets **merged**, you earn the full points!\n\n` +
+                  `Share your PR in **#pr-reviews** on Discord for peer feedback!`
               });
-
-              // Remove invalid label if present
               try {
                 await github.rest.issues.removeLabel({
                   owner: context.repo.owner,
@@ -180,6 +157,114 @@ jobs:
                 });
               } catch {}
             }
+
+  # ── Job 2: Runs when maintainer approves — awards submission points
+  award_submission:
+    if: |
+      github.event_name == 'pull_request_review' &&
+      github.event.review.state == 'approved'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+      issues: write
+
+    steps:
+      - name: Award submission points
+        uses: actions/github-script@v7
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          DISCORD_POINTS_WEBHOOK: ${{ secrets.DISCORD_POINTS_WEBHOOK }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pr = context.payload.pull_request;
+            const author = pr.user.login;
+            const prNumber = pr.number;
+            const labels = pr.labels.map(l => l.name);
+
+            const SUBMIT_POINTS = {
+              'onboarding': 5, 'documentation': 5, 'first-timers-only': 5,
+              'design': 8, 'bug-fix': 10, 'enhancement': 12, 'feature': 20
+            };
+
+            const issueType = Object.keys(SUBMIT_POINTS).find(k => labels.includes(k)) || 'bug-fix';
+            const points = SUBMIT_POINTS[issueType];
+
+            const supabaseUrl = process.env.SUPABASE_URL;
+            const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
+            const headers = {
+              apikey: supabaseKey,
+              Authorization: `Bearer ${supabaseKey}`,
+              'Content-Type': 'application/json'
+            };
+
+            // Check participant exists
+            const pRes = await fetch(
+              `${supabaseUrl}/rest/v1/participants?github_username=eq.${author}&select=discord_id`,
+              { headers }
+            );
+            const participants = await pRes.json();
+            if (!participants.length) return;
+
+            // Award submission points
+            await fetch(`${supabaseUrl}/rest/v1/rpc/award_submission_points`, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({ github_user: author, pts: points })
+            });
+
+            // Log contribution as submitted
+            const body = pr.body || '';
+            const issueMatch = body.match(/closes\s+#(\d+)/i);
+            const issueNumber = issueMatch ? parseInt(issueMatch[1]) : null;
+
+            if (issueNumber) {
+              await fetch(`${supabaseUrl}/rest/v1/contributions`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({
+                  github_username: author,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  pr_number: prNumber,
+                  issue_type: issueType,
+                  difficulty: labels.find(l => ['easy','medium','hard'].includes(l)) || 'easy',
+                  submission_points: points,
+                  merge_points: 0,
+                  points_awarded: points,
+                  pr_url: pr.html_url,
+                  submitted_at: new Date().toISOString(),
+                  status: 'approved'
+                })
+              });
+            }
+
+            // Comment on PR
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body:
+                `## ⭐ Submission Points Awarded!\n\n` +
+                `@${author} earned **${points} points** for submitting a reviewed PR!\n\n` +
+                `${pr.merged ? '' : `🏆 This PR is under consideration for merge — if selected, you'll earn **${points} more bonus points!**`}`
+            });
+
+            // Notify Discord
+            if (process.env.DISCORD_POINTS_WEBHOOK) {
+              await fetch(process.env.DISCORD_POINTS_WEBHOOK, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  embeds: [{
+                    title: '⭐ Submission Points Awarded!',
+                    description:
+                      `**@${author}** earned **${points} pts** for PR #${prNumber} in \`${context.repo.repo}\`\n` +
+                      `📋 Type: \`${issueType}\` | Status: approved, awaiting merge decision`,
+                    color: 0x3498DB,
+                    timestamp: new Date().toISOString()
+                  }]
+                })
+              });
+            }
